@@ -1,5 +1,5 @@
 import untangle
-import sys, os, time, configparser
+import sys, os, time, configparser, re
 
 ct2vecWatermark = """
        _   ___                 
@@ -21,50 +21,13 @@ default_ini = """; to disable a setting, comment out it by adding ';' at the sta
 ; add after every line a comment with the base address and the type of pointer
 addComments=True"""
 
-def formatEntryName(name: str):
-    resultString = ""
-    weird_chars = "\`\'\" ()[]{}-=,.;@!£$%^&*+~#/?><\\|¬"
-    for char in name:
-        if char not in weird_chars:
-            resultString += char
-    return numbersAsSuffix(resultString)
-
-def numbersAsSuffix(name: str):
-    numbers = "0123456789"
-    resultString = ""
-    if (name[0] in numbers):
-        suffix = ""
-        counter = 0
-        for char in name:
-            if char in numbers:
-                suffix += char
-            else:
-                break
-            counter+=1
-        resultString = name[counter:] + suffix
-    else:
-        resultString = name
-    return resultString
-
-def listToPrettyString(_list: list):
-    offsets = _list[::-1]
-    returnString = ""
-    counter = 1
-    for element in offsets:
-        returnString += "0x{}".format(element)
-        if (counter < len(offsets)):
-            returnString += ", "
-        counter+=1
-
-    return returnString
-
 class Pointer:
     def __init__(self, object):
         self._object = object
 
         self.name = "NA"
         try:
-            self.name = formatEntryName(self._object.Description.cdata)
+            self.name = self.formatEntryName(self._object.Description.cdata)
         except AttributeError:
             pass
 
@@ -84,7 +47,7 @@ class Pointer:
         
         self.type = "NA"
         try:
-            self.type = formatEntryName(self._object.VariableType.cdata)
+            self.type = self.formatEntryName(self._object.VariableType.cdata)
         except AttributeError:
             pass
 
@@ -96,85 +59,115 @@ class Pointer:
         except Exception:
             pass
     
+    def listToPrettyString(self, offsets: list):
+        offsets = offsets[::-1]
+        returnString = ""
+        counter = 1
+        for element in offsets:
+            returnString += "0x{}".format(element)
+            if (counter < len(offsets)):
+                returnString += ", "
+            counter+=1
+
+        return returnString
+    
+    def numbersAsSuffix(self, name: str):
+        if (name[0] in "0123456789"):
+            suffix = ""
+            counter = 0
+            for char in name:
+                if char in "0123456789":
+                    suffix += char
+                else:
+                    break
+                counter+=1
+            return name[counter:] + suffix
+        else:
+            return name
+    
+    def formatEntryName(self, name: str):
+        return self.numbersAsSuffix(name.translate(str.maketrans('', '', "\`\'\" ()[]{}-=,.;@!£$%^&*+~#/?><\\|¬")))
+    
     def pprint(self, comments=False):
         output = ""
         if self.offsets != "NA":
             output = "\n"
             if comments:
-                output += "std::vector<uint64_t> {} = {}; // Base: {}; Type: {}".format(self.name, "{"+listToPrettyString(self.offsets)+"}", self.base, self.type)
+                output += "std::vector<uint64_t> {} = {}; // Base: {}; Type: {}".format(self.name, "{"+self.listToPrettyString(self.offsets)+"}", self.base, self.type)
             else:
-                output += "std::vector<uint64_t> {} = {};".format(self.name, "{"+listToPrettyString(self.offsets)+"}")
+                output += "std::vector<uint64_t> {} = {};".format(self.name, "{"+self.listToPrettyString(self.offsets)+"}")
 
-        if self.subPointers != []:
-            for i in self.subPointers:
-                output += "\n" + i.pprint(comments)
+        for i in self.subPointers:
+            output += "\n" + i.pprint(comments)
         
         return output
 
-def ct2vec(path, console=True):
-    if console:
-        os.system("cls")
-    try:
-        file = open(path)
-    except Exception:
-        path = input("Cheat table file: ")
-        file = open(path)
+class ct2vecApp:
+    def __init__(self, path, console=True):
+        self.console = console
+        if self.console:
+            os.system("cls")
+        try:
+            file = open(path)
+        except Exception:
+            path = input("Cheat table file path: ")
+            file = open(path)
+
+        print(ct2vecWatermark)
+
+        self.xmlContent = file.read()
+        file.close()
+
+        if getattr(sys, 'frozen', False):
+            self.appPath = os.path.dirname(sys.executable)
+        else:
+            self.appPath = os.path.dirname(os.path.abspath(__file__))
+    def run(self):
+        if not os.path.isfile(os.path.join(self.appPath, 'config.ini')):
+            f = open(os.path.join(self.appPath, "config.ini"), 'w')
+            f.write(default_ini)
+            f.close()
+
+        configFile = configparser.ConfigParser()
+        configFile.read(os.path.join(self.appPath, 'config.ini'))
+
+        try:
+            commentsBool = configFile.getboolean('settings','addComments')
+        except Exception:
+            print("Can't access config.ini file, using default settings")
+            commentsBool = False
+
+        outputFilePath = os.path.join(self.appPath, "output.txt")
+        outputFile = open(outputFilePath, "w")
+
+        startTime = time.time()
+        _input = untangle.parse(self.xmlContent).CheatTable.CheatEntries.CheatEntry
+        for entry in _input:
+            pointer = Pointer(entry)
+            outputFile.write(pointer.pprint(commentsBool))
+
+        outputFile.write(ct2vecSealOfQuality)
+        outputFile.close()
+
+        endTime = round(time.time() - startTime, 3)
+
+        lines = ""
+
+        with open(outputFilePath, "r") as file:
+            for line in file:
+                if (line != "\n"):
+                    lines += line
+
+        with open(outputFilePath, "w") as file:
+            file.write(lines)
+
+        print("Result saved to file: {}".format(outputFilePath))
+        print("Conversion finished in {}s".format(endTime))
+
+        if self.console:
+            os.system("pause")
     
-    print(ct2vecWatermark)
-
-    xmlContent = file.read()
-    file.close()
-
-    if getattr(sys, 'frozen', False):
-        application_path = os.path.dirname(sys.executable)
-    else:
-        application_path = os.path.dirname(os.path.abspath(__file__))
-
-    if not os.path.isfile(os.path.join(application_path, 'config.ini')):
-        f = open(os.path.join(application_path, "config.ini"), 'w')
-        f.write(default_ini)
-        f.close()
-    
-    configFile = configparser.ConfigParser()
-    configFile.read(os.path.join(application_path, 'config.ini'))
-    
-    try:
-        comments = configFile.getboolean('settings','addComments')
-    except Exception:
-        print("Can't access config.ini file, using default settings")
-        comments = False
-    
-    outputFilePath = os.path.join(application_path, "output.txt")
-    outputFile = open(outputFilePath, "w")
-
-    startTime = time.time()
-    _input = untangle.parse(xmlContent).CheatTable.CheatEntries.CheatEntry
-    for entry in _input:
-        pointer = Pointer(entry)
-        outputFile.write(pointer.pprint(comments))
-    
-    outputFile.write(ct2vecSealOfQuality)
-    outputFile.close()
-
-    endTime = round(time.time() - startTime, 3)
-
-    lines = ""
-
-    with open(outputFilePath, "r") as file:
-        for line in file:
-            if (line != "\n"):
-                lines += line
-    
-    with open(outputFilePath, "w") as file:
-        file.write(lines)
-
-    print("Result saved to file: {}".format(outputFilePath))
-    print("Conversion finished in {}s".format(endTime))
-    
-
-    
-    if console:
-        os.system("pause")
 
 if __name__ == '__main__':
-    ct2vec(sys.argv[1], True)
+    app = ct2vecApp(sys.argv[1], True)
+    app.run()
