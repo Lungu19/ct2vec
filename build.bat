@@ -1,0 +1,1 @@
+pyinstaller --onefile --upx-dir=.\upx --icon=logo.ico --clean  .\ct2vec.py
