@@ -19,11 +19,13 @@ ct2vecSealOfQuality = """
 default_ini = """; to disable a setting, comment out it by adding ';' at the start of the line
 [settings]
 ; add after every line a comment with the base address and the type of pointer
-addComments=True"""
+addComments=True
+vectorType=addr_t"""
 
 class Pointer:
-    def __init__(self, object):
+    def __init__(self, object, vectorType):
         self._object = object
+        self.vectorType = vectorType
 
         self.name = "NA"
         try:
@@ -55,7 +57,7 @@ class Pointer:
         try:
             subPointers = self._object.CheatEntries.CheatEntry
             for subPointer in subPointers:
-                self.subPointers.append(Pointer(subPointer))
+                self.subPointers.append(Pointer(subPointer, self.vectorType))
         except Exception:
             pass
     
@@ -93,9 +95,9 @@ class Pointer:
         if self.offsets != "NA":
             output = "\n"
             if comments:
-                output += "std::vector<uint64_t> {} = {}; // Base: {}; Type: {}".format(self.name, "{"+self.listToPrettyString(self.offsets)+"}", self.base, self.type)
+                output += "std::vector<{}> {} = {}; // Base: {}; Type: {}".format(self.vectorType, self.name, "{"+self.listToPrettyString(self.offsets)+"}", self.base, self.type)
             else:
-                output += "std::vector<uint64_t> {} = {};".format(self.name, "{"+self.listToPrettyString(self.offsets)+"}")
+                output += "std::vector<{}> {} = {};".format(self.vectorType, self.name, "{"+self.listToPrettyString(self.offsets)+"}")
 
         for i in self.subPointers:
             output += "\n" + i.pprint(comments)
@@ -133,9 +135,12 @@ class ct2vecApp:
 
         try:
             commentsBool = configFile.getboolean('settings','addComments')
+            vectorType = configFile.get('settings', 'vectorType')
         except Exception:
             print("Can't access config.ini file, using default settings")
             commentsBool = False
+            vectorType = "addr_t"
+            print("Error: ",sys.exc_info()[0])
 
         outputFilePath = os.path.join(self.appPath, "output.txt")
         outputFile = open(outputFilePath, "w")
@@ -143,7 +148,7 @@ class ct2vecApp:
         startTime = time.time()
         _input = untangle.parse(self.xmlContent).CheatTable.CheatEntries.CheatEntry
         for entry in _input:
-            pointer = Pointer(entry)
+            pointer = Pointer(entry, vectorType)
             outputFile.write(pointer.pprint(commentsBool))
 
         outputFile.write(ct2vecSealOfQuality)
